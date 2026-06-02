@@ -2,14 +2,16 @@
 
 import React from 'react';
 import * as Icons from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useAppStore } from '../store/useAppStore';
 
 export default function LandingPage() {
   const { setActiveTab } = useAppStore();
+  const router = useRouter();
 
   const handleCTA = (tab: string) => {
     setActiveTab(tab);
-    window.history.pushState(null, '', `/${tab}`);
+    router.push(`/${tab}`);
   };
 
   const features = [

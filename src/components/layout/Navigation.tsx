@@ -5,7 +5,7 @@ import { useAppStore } from '../../store/useAppStore';
 import { SIDEBAR_LINKS } from '../../constants';
 import * as Icons from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { useSettings, useProfile } from '../../hooks/useApi';
+import { useSettings, useProfile, useLogout } from '../../hooks/useApi';
 
 // Helper to render Lucide Icons dynamically by name
 const DynamicIcon = ({ name, className }: { name: string; className?: string }) => {
@@ -17,6 +17,7 @@ const DynamicIcon = ({ name, className }: { name: string; className?: string }) 
 export default function Navigation() {
   const { data: settings } = useSettings();
   const { data: profile } = useProfile();
+  const logoutMutation = useLogout();
 
   const { 
     activeTab, 
@@ -25,6 +26,10 @@ export default function Navigation() {
     toggleSidebar, 
     notifications 
   } = useAppStore();
+
+  const handleLogout = () => {
+    logoutMutation.mutate();
+  };
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -105,13 +110,24 @@ export default function Navigation() {
       {/* Bottom Panel */}
       <div className="p-4 border-t border-slate-800/80 bg-slate-900/20">
         {isSidebarCollapsed ? (
-          <button 
-            onClick={toggleSidebar} 
-            className="w-full flex items-center justify-center py-2 rounded-lg hover:bg-slate-800/40 cursor-pointer"
-            title="Expand Sidebar"
-          >
-            <Icons.ChevronRight className="w-5 h-5 text-slate-400" />
-          </button>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={handleLogout}
+              disabled={logoutMutation.isPending}
+              className="w-full flex items-center justify-center py-2.5 rounded-lg hover:bg-brand-rose/10 text-slate-400 hover:text-brand-rose transition-all cursor-pointer"
+              title="Log Out Session"
+            >
+              <Icons.LogOut className="w-5 h-5" />
+            </button>
+            
+            <button 
+              onClick={toggleSidebar} 
+              className="w-full flex items-center justify-center py-2 rounded-lg hover:bg-slate-800/40 cursor-pointer"
+              title="Expand Sidebar"
+            >
+              <Icons.ChevronRight className="w-5 h-5 text-slate-400" />
+            </button>
+          </div>
         ) : (
           <div className="space-y-3">
             {/* Active Model Indicator */}
@@ -125,18 +141,29 @@ export default function Navigation() {
               </p>
             </div>
 
-            {/* Profile Summary */}
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-slate-200 shadow-inner">
-                  {profile?.full_name?.charAt(0) || 'AD'}
+            {/* Profile Summary & Logout */}
+            <div className="flex items-center justify-between gap-2.5">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="relative flex-shrink-0">
+                  <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-slate-200 shadow-inner">
+                    {profile?.full_name?.charAt(0) || 'AD'}
+                  </div>
+                  <div className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-brand-emerald border-2 border-brand-dark" />
                 </div>
-                <div className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-brand-emerald border-2 border-brand-dark" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-white truncate">{profile?.full_name || 'Admin Operator'}</p>
+                  <p className="text-[10px] text-slate-400 truncate">{profile?.role?.toUpperCase() || 'SLA Group A'}</p>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-white truncate">{profile?.full_name || 'Admin Operator'}</p>
-                <p className="text-[10px] text-slate-400 truncate">{profile?.role?.toUpperCase() || 'SLA Group A'}</p>
-              </div>
+              
+              <button
+                onClick={handleLogout}
+                disabled={logoutMutation.isPending}
+                className="p-2 rounded-lg bg-slate-950/40 border border-slate-850 hover:bg-brand-rose/10 hover:border-brand-rose/30 hover:text-brand-rose transition-all flex-shrink-0 cursor-pointer"
+                title="Log Out Session"
+              >
+                <Icons.LogOut className="w-4 h-4" />
+              </button>
             </div>
           </div>
         )}
