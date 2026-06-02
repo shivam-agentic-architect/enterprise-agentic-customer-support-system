@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # 1. FastAPI service
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/lauki_care
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=super_secure_enterprise_ai_secret_key_rotation_994
+      - JWT_ALGORITHM=HS256
+      - AWS_ACCESS_KEY_ID=""
+      - AWS_SECRET_ACCESS_KEY=""
+      - AWS_REGION=us-east-1
+      - BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
+      - OPENSEARCH_HOST=""
+    depends_on:
+      - db
+      - redis
+    restart: always
+
+  # 2. Database service (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=lauki_care
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  # 3. Cache service (Redis)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: always
+
+volumes:
+  postgres_data:

@@ -1,0 +1,42 @@
+# Stage 1: Dependency installer
+FROM node:20-alpine AS deps
+WORKDIR /workspace
+
+# Copy dependencies lists
+COPY package.json package-lock.json ./
+
+# Install npm packages skipping audit logs to speed up builds
+RUN npm install --legacy-peer-deps
+
+# Stage 2: Application bundler builder
+FROM node:20-alpine AS builder
+WORKDIR /workspace
+
+COPY --from=deps /workspace/node_modules ./node_modules
+COPY . .
+
+# Set environment argument variables during compile
+ENV NEXT_PUBLIC_API_URL=http://localhost:8000/api
+ENV NODE_ENV=production
+
+# Compile Next.js pages statically
+RUN npm run build
+
+# Stage 3: Lightweight runner runtime
+FROM node:20-alpine AS runner
+WORKDIR /workspace
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+# Copy compiled bundles
+COPY --from=builder /workspace/public ./public
+COPY --from=builder /workspace/.next ./.next
+COPY --from=builder /workspace/node_modules ./node_modules
+COPY --from=builder /workspace/package.json ./package.json
+
+EXPOSE 3000
+
+# Start server
+CMD ["npm", "run", "start"]

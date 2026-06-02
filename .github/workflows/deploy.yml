@@ -1,0 +1,144 @@
+name: CI/CD Production Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write # Required for requesting the JWT for AWS OIDC authentication
+  contents: read  # Required for actions/checkout
+
+jobs:
+  # ----------------------------------------------------
+  # Job 1: Quality Control (Linting & Testing)
+  # ----------------------------------------------------
+  quality-control:
+    name: Lint & Test Services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Frontend Checks
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Lint Frontend
+        run: npm run lint
+
+      # Backend Checks
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Backend Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Lint Backend with Ruff
+        run: |
+          pip install ruff
+          ruff check backend/app
+
+      - name: Run Backend Unit Tests
+        run: |
+          pip install pytest pytest-asyncio
+          cd backend && pytest
+
+  # ----------------------------------------------------
+  # Job 2: Build, Push & Deploy to AWS (ECR/ECS Fargate)
+  # ----------------------------------------------------
+  deploy:
+    name: Build, Push & Deploy to AWS
+    needs: quality-control
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Configure AWS Credentials using OpenID Connect (OIDC) - Preferred for Enterprise
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GithubActionsECSDeployRole
+          aws-region: ${{ secrets.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      # Login to Amazon ECR
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Build and Push Backend Image to Amazon ECR
+      - name: Build and Push Backend Image
+        id: build-backend-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.AWS_ECR_BACKEND_REPO }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest -f backend/Dockerfile backend/
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "backend_image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      # Build and Push Frontend Image to Amazon ECR
+      - name: Build and Push Frontend Image
+        id: build-frontend-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.AWS_ECR_FRONTEND_REPO }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest -f Dockerfile.frontend .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "frontend_image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      # Download Active ECS Task Definitions
+      - name: Download Task Definition
+        run: |
+          aws ecs describe-task-definition --task-definition ${{ secrets.AWS_ECS_TASK_DEFINITION_FAMILY }} --query taskDefinition > task-definition.json
+
+      # Render the Task Definition for Backend
+      - name: Fill in the new Backend Image in the Amazon ECS Task Definition
+        id: render-backend-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: backend
+          image: ${{ steps.build-backend-image.outputs.backend_image }}
+
+      # Render the Task Definition for Frontend
+      - name: Fill in the new Frontend Image in the Amazon ECS Task Definition
+        id: render-frontend-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-backend-task-def.outputs.task-definition }}
+          container-name: frontend
+          image: ${{ steps.build-frontend-image.outputs.frontend_image }}
+
+      # Deploy Task Definition to ECS Service
+      - name: Deploy Amazon ECS Task Definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-frontend-task-def.outputs.task-definition }}
+          service: ${{ secrets.AWS_ECS_SERVICE_NAME }}
+          cluster: ${{ secrets.AWS_ECS_CLUSTER_NAME }}
+          wait-for-service-stability: true
